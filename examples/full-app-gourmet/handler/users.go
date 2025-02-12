@@ -88,17 +88,21 @@ func (rs Resource) logout(c fuego.ContextNoBody) (any, error) {
 }
 
 func (rs Resource) me(c fuego.ContextNoBody) (any, error) {
-	t, err := fuego.TokenFromContext(c.Context())
-	if err != nil {
-		slog.Error("Error getting token from context", "error", err)
-		return nil, err
+	value := c.Value("JWT")
+	if value == nil {
+		return nil, fuego.UnauthorizedError{Title: "Unauthorized", Detail: "No token found"}
 	}
-	slog.Info("slog", "token", t)
+	t, ok := value.(jwt.MapClaims)
+	if !ok {
+		return nil, fuego.UnauthorizedError{Title: "Unauthorized", Detail: "Invalid token"}
+	}
+	slog.Info("me", "token", t)
 
 	issuer, err := t.GetIssuer()
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("me", "issuer", issuer)
 
 	return rs.UsersQueries.GetUserByUsername(c.Context(), issuer)
 }

@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/rs/cors"
 
 	"github.com/go-fuego/fuego"
@@ -59,10 +62,49 @@ func (rs Resources) Setup(
 	fuego.Handle(app, "/static/", http.StripPrefix("/static", static.Handler()), option.Middleware(cache))
 
 	fuego.Use(app,
-		rs.HandlersResources.Security.TokenToContext(fuego.TokenFromCookie, fuego.TokenFromHeader),
+		TokenToContext(rs.HandlersResources.Security, fuego.TokenFromCookie, fuego.TokenFromHeader),
 	)
 	// Register views (controllers that return HTML pages)
 	rs.HandlersResources.Routes(app)
 
 	return app
+}
+
+func TokenToContext(security fuego.Security, searchFunc ...func(*http.Request) string) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Get the authorizationHeader from the header
+			token := ""
+			for _, f := range searchFunc {
+				token = f(r)
+				if token != "" {
+					break
+				}
+			}
+
+			if token == "" {
+				// Unauthenticated, might be legit
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Validate the token
+			t, err := security.ValidateToken(token)
+			if err != nil {
+				fuego.SendJSONError(w, nil, err)
+				return
+			}
+
+			// Get the claims
+			claims := t.Claims.(jwt.MapClaims)
+
+			// Set the subject and roles in the context
+			ctx := r.Context()
+			ctx = context.WithValue(ctx, "JWT", claims)
+			r = r.WithContext(ctx)
+
+			// Call the next handler
+			next.ServeHTTP(w, r)
+		})
+	}
 }
